@@ -1,2 +1,3 @@
-# blind-justice
-Code for the paper "Blind Justice: Fairness with Encrypted Sensitive Attributes", ICML 2018
+# Blind Justice
+
+This repository will contain the code for the paper "Blind Justice: Fairness with Encrypted Sensitive Attributes", ICML 2018.
