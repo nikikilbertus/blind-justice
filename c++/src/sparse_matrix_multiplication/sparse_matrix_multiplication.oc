@@ -1,0 +1,131 @@
+#include "sparse_matrix_multiplication.h"
+#include "obliv.oh"
+#include "osort.oh"
+#include "bcrandom.h"
+#include "copy.oh"
+#include "shuffle.oh"
+
+// data structures needed
+struct L {
+    obliv word_t k;
+    obliv index_t v;
+    obliv bool party;
+};
+
+struct M {
+    obliv index_t v_A;
+    obliv index_t v_B;
+    obliv bool valid;
+    obliv bool equal;
+};
+
+// compares elements of L by k first and by party second
+obliv char cmp_L(OcCopy *cpy, void *el1, void *el2) {
+    struct L *l1 = el1, *l2 = el2;
+    obliv char ret = 0;
+    obliv if((l2->k > l1->k) | ((l1->k == l2->k) & (l1->party > l2->party))) {
+        ret = 1;
+    }
+    return ret;
+}
+
+// randomness used for resolving ties in cmp_M
+obliv char cmp_M(OcCopy *cpy, void *el1, void *el2) {
+    struct M *m1 = el1, *m2 = el2;
+    obliv char ret = 0;
+    // swap valid elements to lower positions and order them by v_A
+    obliv if((m2->valid & ~(m1->valid) & 0x01) | (m1->valid & m2->valid & (m1->v_A < m2->v_A))) {
+        ret = 1;
+    }
+    return ret;
+}
+
+void sparse_matrix_multiplication(void *_args) {
+    sparse_matrix_multiplication_args *args = _args;
+
+    size_t k_A = args->k_A, k_B = args->k_B;
+    // reorder inputs, which allows us to use feedObliv*Array
+    word_t *words_clear = malloc((k_A + k_B) * sizeof(word_t));
+    index_t *indices_B_clear = malloc(k_B * sizeof(index_t));
+    if(ocCurrentParty() == 1) {
+      for(size_t i = 0; i < k_A; i++) {
+        words_clear[i] = args->in_A[i];
+      }
+    } else {
+      for(size_t i = 0; i < k_B; i++) {
+        words_clear[i + k_A] = args->in_B[i].k;
+        indices_B_clear[i] = args->in_B[i].v;
+      }
+    }
+    // allocate storage for oblivious arrays
+    obliv word_t *words = malloc((k_A + k_B) * sizeof(obliv word_t));
+    obliv index_t *indices_B = malloc(k_B * sizeof(obliv index_t));
+    obliv index_t *result_indices_B = malloc(k_A * sizeof(obliv index_t));
+    struct L *L = malloc((k_A + k_B) * sizeof(struct L));
+    struct M *M = malloc((k_A + k_B) * sizeof(struct M));
+    obliv index_t *Z = malloc(k_A * sizeof(obliv index_t));
+    // copy objects for sorting
+    OcCopy cpy_L = ocCopyBoolN(sizeof(struct L) / sizeof(obliv bool));
+    OcCopy cpy_M = ocCopyBoolN(sizeof(struct M) / sizeof(obliv bool));
+
+    // get all input arrays
+    feedOblivIntArray(words, words_clear, k_A, 1);
+    feedOblivIntArray(words + k_A, words_clear + k_A, k_B, 2);
+    feedOblivShortArray(indices_B, indices_B_clear, k_B, 2);
+    feedOblivShortArray(Z, args->zeroes_B, k_A, 2);
+
+    // read inputs from A
+    for(size_t i = 0; i < k_A; i++) {
+        L[i].k = words[i];
+        L[i].v = i;
+        L[i].party = 0;
+    }
+    // read inputs from B
+    for(size_t i = 0; i < k_B; i++) {
+        L[k_A + i].k = words[k_A + i];
+        L[k_A + i].v = indices_B[i];
+        L[k_A + i].party = 1;
+    }
+    // sort L
+    osort_batcher(&cpy_L, L, k_A + k_B, cmp_L);
+    // compare adjacent elements and put them into M, valid ones first
+    for(size_t i = 0; i < k_A + k_B; i++) {
+        M[i].valid = (L[i].party == 0);
+        M[i].v_A = L[i].v;
+        if(i < k_A + k_B - 1) {
+          M[i].v_B = L[i+1].v;
+          M[i].equal = (L[i].k == L[i+1].k);
+        } else {
+          M[i].v_B = -1;
+          M[i].equal = 0;
+        }
+    }
+    // sort M
+    osort_batcher(&cpy_M, M, k_A + k_B, cmp_M);
+
+
+    // Copy valid elements that are equal into result, set those to zero that are not
+    for(size_t i = 0; i < k_A; i++) {
+        obliv if(M[i].equal) {
+            result_indices_B[i] = M[i].v_B;
+        } else {
+            result_indices_B[i] = Z[i];
+        }
+    }
+
+    // reveal results to party 1; use second loop to
+    // keep number of communication rounds constant
+    for(size_t i = 0; i < k_A; i++) {
+      revealOblivShort(&(args->result[i].v_A), M[i].v_A, 1);
+      revealOblivShort(&(args->result[i].v_B), result_indices_B[i], 1);
+    }
+
+    free(words_clear);
+    free(indices_B_clear);
+    free(words);
+    free(indices_B);
+    free(result_indices_B);
+    free(L);
+    free(M);
+    free(Z);
+}

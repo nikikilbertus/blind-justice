@@ -1,0 +1,55 @@
+#include "secureml_sigmoid.h"
+#include "obliv.oh"
+
+void secureml_sigmoid(void *_args) {
+    secureml_sigmoid_args *args = _args;
+
+    // allocate storage for oblivious arrays
+    obliv uint32_t *v_plus_half = malloc(args->n * sizeof(obliv uint32_t));
+    obliv uint32_t *v_minus_half = malloc(args->n * sizeof(obliv uint32_t));
+    obliv uint32_t *v_share_1_plus_half = malloc(args->n * sizeof(obliv uint32_t));
+    obliv uint32_t *v_share_1_minus_half = malloc(args->n * sizeof(obliv uint32_t));
+    obliv uint32_t *v_share_2 = malloc(args->n * sizeof(obliv uint32_t));
+    obliv uint32_t *result = malloc(args->n * sizeof(obliv uint32_t));
+    
+    // get input arrays
+    feedOblivIntArray(v_share_1_plus_half, args->v_share_0_plus_half, args->n, 1);
+    feedOblivIntArray(v_share_1_minus_half, args->v_share_0_minus_half, args->n, 1);
+    feedOblivIntArray(v_share_2, args->v_share_1, args->n, 2);
+    
+    /*
+        We need to compute f(x) for every x in v_share_1 + v_share_2,
+        where f(x) = 
+            0 if x < -1/2,
+            x + 1/2 if x \in [-1/2, +1/2],
+            1 if x > +1/2
+    */
+
+    for(size_t i = 0; i < args->n; i++) {
+        v_plus_half[i] = v_share_1_plus_half[i] + v_share_2[i];
+        // b1 = 1 if v[i] + 1/2 > 0 and 1 otherwise
+        obliv uint8_t b1 = (~v_plus_half[i]) >> 31;
+        v_minus_half[i] = v_share_1_minus_half[i] + v_share_2[i];
+        // b2 = 1 if v[i] - 1/2 <= 0 and 1 otherwise
+        obliv uint8_t b2 = v_minus_half[i] >> 31;
+        obliv if (b1 & b2) {
+            result[i] = v_plus_half[i];
+        } else obliv if (b2){
+            result[i] = (obliv uint8_t) 0;
+        } else {
+            result[i] = (obliv uint8_t) 1;
+        }
+    }
+
+    for(size_t i = 0; i < args->n; i++) {
+        // Party 1 gets the result masked with Party 2's value
+        revealOblivShort(&(args->result_share_0[i]), result[i] + args->result_share_1[i], 1);
+    }
+
+    free(v_plus_half);
+    free(v_minus_half);
+    free(v_share_1_plus_half);
+    free(v_share_1_minus_half);
+    free(v_share_2);
+    free(result);
+}

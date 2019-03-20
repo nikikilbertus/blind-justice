@@ -1,0 +1,63 @@
+#include "select_theta.h"
+#include "obliv.oh"
+
+void select_theta(void *_args) {
+    select_theta_args *args = _args;
+
+    // allocate storage for oblivious arrays
+    obliv uint32_t *theta_0_0 = malloc(args->n * sizeof(obliv uint32_t));
+	obliv uint32_t *theta_1_0 = malloc(args->n * sizeof(obliv uint32_t));
+    obliv uint32_t *theta_2_0 = malloc(args->n * sizeof(obliv uint32_t));
+    obliv uint32_t *theta_0_1 = malloc(args->n * sizeof(obliv uint32_t));
+	obliv uint32_t *theta_1_1 = malloc(args->n * sizeof(obliv uint32_t));
+    obliv uint32_t *theta_2_1 = malloc(args->n * sizeof(obliv uint32_t));
+    obliv uint32_t *result = malloc(args->n * sizeof(obliv uint32_t));
+
+    // get input arrays
+    feedOblivIntArray(theta_0_0, args->theta_0_0, args->n, 1);
+    feedOblivIntArray(theta_1_0, args->theta_1_0, args->n, 1);
+    feedOblivIntArray(theta_2_0, args->theta_1_0, args->n, 1);
+    feedOblivIntArray(theta_0_1, args->theta_0_1, args->n, 2);
+    feedOblivIntArray(theta_1_1, args->theta_1_1, args->n, 2);
+    feedOblivIntArray(theta_2_1, args->theta_1_1, args->n, 2);
+
+    // get sign bit in input selectors
+    obliv uint8_t sb_0_0 = feedOblivShort(args->s_0_0, 1) >> 7;
+    obliv uint8_t sb_1_0 = feedOblivShort(args->s_1_0, 1) >> 7;
+    obliv uint8_t sb_2_0 = feedOblivShort(args->s_1_0, 1) >> 7;
+    obliv uint8_t sb_0_1 = feedOblivShort(args->s_0_1, 2) >> 7;
+    obliv uint8_t sb_1_1 = feedOblivShort(args->s_1_1, 2) >> 7;
+    obliv uint8_t sb_2_1 = feedOblivShort(args->s_1_1, 2) >> 7;
+
+
+	obliv if (sb_0_0) {
+		for(size_t i = 0; i < args->n; i++) {
+			result[i] = theta_0_0[i] + theta_0_1[i];
+		}
+    } else obliv if (sb_1_0) {
+		for(size_t i = 0; i < args->n; i++) {
+			result[i] = theta_1_0[i] + theta_1_1[i];
+		}
+	} else {
+		for(size_t i = 0; i < args->n; i++) {
+			result[i] = theta_2_0[i] + theta_2_1[i];
+		}
+	}
+
+
+	for(size_t i = 0; i < args->n; i++) {
+	    // Party 1 gets the result masked with Party 2's value
+		revealOblivInt(
+	    	&(args->result_share_0[i]),
+	    		result[i] + args->result_share_1[i],
+	        	1);
+	}
+
+    free(theta_0_0);
+    free(theta_1_0);
+    free(theta_2_0);
+    free(theta_0_1);
+    free(theta_1_1);
+    free(theta_2_1);
+    free(result);
+}
